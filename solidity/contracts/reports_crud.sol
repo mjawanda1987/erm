@@ -43,7 +43,7 @@ contract Report {
         uint256 tds,
         string companyName
     );
-    event LogUpdateReport(address sender, bytes32 key, bool signed);
+    event LogReportSigned(address sender, bytes32 key);
     event LogRemReport(address sender, bytes32 key);
 
     event NewUser(address sender, string name);
@@ -96,17 +96,22 @@ contract Report {
         emit NewUser(msg.sender, name);
     }
 
-    function checkTime() internal {
-        if (
-            users[msg.sender].lastReport != 0 &&
-            users[msg.sender].lastReport + maxDelay < now
-        ) {
+    function checkTime(bytes32 key) internal {
+        if (reports[key].timestamp + maxDelay < now) {
             // Charge fee to user for the delay
-            users[msg.sender].balance -= delayFee;
-            emit LateReport(msg.sender, delayFee, now);
+            uint256 timeDelayed = now - reports[key].timestamp - maxDelay;
+            uint256 feeToCharge = (timeDelayed / maxDelay) * delayFee;
+
+            require(
+                users[msg.sender].balance >= feeToCharge,
+                "Not enough balance to pay delay fee"
+            );
+
+            users[msg.sender].balance -= feeToCharge;
+            emit LateReport(msg.sender, feeToCharge, now);
         }
         // Update user's last report time
-        users[msg.sender].lastReport = now;
+        // users[msg.sender].lastReport = now;
     }
 
     function deposit() external payable {
@@ -124,8 +129,6 @@ contract Report {
         uint256 _tds,
         string memory _companyName
     ) public onlyWithBalance onlyCreatedUser {
-        checkTime();
-
         bytes32 key = keccak256(
             abi.encodePacked(
                 msg.sender,
@@ -157,14 +160,16 @@ contract Report {
         );
     }
 
-    function updateReport(bytes32 key, bool _signed) public {
+    function signReport(bytes32 key) public {
+        require(!reports[key].signed, "Report is already signed");
+
+        checkTime(key);
         require(
             reportSet.exists(key),
-            "Can't update a report that doesn't exist."
+            "Can't sign a report that doesn't exist."
         );
-        ReportStruct storage w = reports[key];
-        w.signed = _signed;
-        emit LogUpdateReport(msg.sender, key, _signed);
+        reports[key].signed = true;
+        emit LogReportSigned(msg.sender, key);
     }
 
     function remReport(bytes32 key) public {
